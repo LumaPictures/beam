@@ -1061,6 +1061,7 @@ class DockerSdkWorkerHandler(GrpcWorkerHandler):
   def __init__(self, payload, state, provision_info):
     super(DockerSdkWorkerHandler, self).__init__(state, provision_info)
     self._container_image = payload.container_image
+    self._options = payload.options
     self._container_id = None
 
   def start_worker(self):
@@ -1068,19 +1069,24 @@ class DockerSdkWorkerHandler(GrpcWorkerHandler):
       subprocess.check_call(['docker', 'pull', self._container_image])
     except Exception:
       logging.info('Unable to pull image %s' % self._container_image)
-    self._container_id = subprocess.check_output(
-        ['docker',
-         'run',
-         '-d',
-         # TODO:  credentials
-         '--network=host',
-         self._container_image,
-         '--id=%s' % uuid.uuid4(),
-         '--logging_endpoint=%s' % self.logging_api_service_descriptor().url,
-         '--control_endpoint=%s' % self.control_address,
-         '--artifact_endpoint=%s' % self.control_address,
-         '--provision_endpoint=%s' % self.control_address,
-        ]).strip()
+    cmd = [
+      'docker',
+      'run',
+      '-d',
+      # TODO:  credentials
+      '--network=host',
+    ]
+    if self._options:
+      cmd.extend(self._options.split(' '))
+    cmd.extend([
+      self._container_image,
+      '--id=%s' % uuid.uuid4(),
+      '--logging_endpoint=%s' % self.logging_api_service_descriptor().url,
+      '--control_endpoint=%s' % self.control_address,
+      '--artifact_endpoint=%s' % self.control_address,
+      '--provision_endpoint=%s' % self.control_address,
+    ])
+    self._container_id = subprocess.check_output(cmd).strip()
     while True:
       logging.info('Waiting for docker to start up...')
       status = subprocess.check_output([
