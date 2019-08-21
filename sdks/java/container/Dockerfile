@@ -28,6 +28,16 @@ ADD target/beam-sdks-java-harness.jar /opt/apache/beam/jars/
 ADD target/beam-sdks-java-io-kafka.jar /opt/apache/beam/jars/
 ADD target/kafka-clients.jar /opt/apache/beam/jars/
 
+# Required to run cross-language pipelines with PubSubIO
+# TODO May be removed once custom environments are supported
+ADD target/beam-sdks-java-io-google-cloud-platform.jar /opt/apache/beam/jars/
+ADD target/beam-sdks-java-extensions-protobuf.jar /opt/apache/beam/jars/
+ADD target/proto-google-cloud-pubsub-v1-1.43.0.jar /opt/apache/beam/jars/
+ADD target/proto-google-common-protos-1.12.0.jar /opt/apache/beam/jars/
+ADD target/protobuf-java-3.6.1.jar /opt/apache/beam/jars/
+ADD target/protobuf-java-util-3.6.1.jar /opt/apache/beam/jars/
+ADD target/google-api-services-pubsub-v1-rev20181105-1.27.0.jar /opt/apache/beam/jars/
+
 ADD target/linux_amd64/boot /opt/apache/beam/
 
 ENTRYPOINT ["/opt/apache/beam/boot"]

@@ -45,43 +45,80 @@ import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.collect.Sets;
 public class ModelCoderRegistrar implements CoderTranslatorRegistrar {
 
   // The URNs for coders which are shared across languages
-  @VisibleForTesting
-  static final BiMap<Class<? extends Coder>, String> BEAM_MODEL_CODER_URNS =
-      ImmutableBiMap.<Class<? extends Coder>, String>builder()
-          .put(ByteArrayCoder.class, ModelCoders.BYTES_CODER_URN)
-          .put(BooleanCoder.class, ModelCoders.BOOL_CODER_URN)
-          .put(StringUtf8Coder.class, ModelCoders.STRING_UTF8_CODER_URN)
-          .put(KvCoder.class, ModelCoders.KV_CODER_URN)
-          .put(VarLongCoder.class, ModelCoders.INT64_CODER_URN)
-          .put(IntervalWindowCoder.class, ModelCoders.INTERVAL_WINDOW_CODER_URN)
-          .put(IterableCoder.class, ModelCoders.ITERABLE_CODER_URN)
-          .put(Timer.Coder.class, ModelCoders.TIMER_CODER_URN)
-          .put(LengthPrefixCoder.class, ModelCoders.LENGTH_PREFIX_CODER_URN)
-          .put(GlobalWindow.Coder.class, ModelCoders.GLOBAL_WINDOW_CODER_URN)
-          .put(FullWindowedValueCoder.class, ModelCoders.WINDOWED_VALUE_CODER_URN)
-          .put(DoubleCoder.class, ModelCoders.DOUBLE_CODER_URN)
-          .build();
+  @VisibleForTesting static final BiMap<Class<? extends Coder>, String> BEAM_MODEL_CODER_URNS;
+  static {
+    try {
+      BEAM_MODEL_CODER_URNS =
+          ImmutableBiMap.<Class<? extends Coder>, String>builder()
+              .put(
+                  (Class<? extends Coder>)
+                      Class.forName(
+                          "org.apache.beam.sdk.io.gcp.pubsub.PubsubMessageWithAttributesCoder"),
+                  ModelCoders.PUBSUB_MESSAGE_WITH_ATTRS_CODER_URN)
+              .put(
+                  (Class<? extends Coder>)
+                      Class.forName(
+                          "org.apache.beam.sdk.io.gcp.pubsub.PubsubMessagePayloadOnlyCoder"),
+                  ModelCoders.PUBSUB_MESSAGE_PAYLOAD_ONLY_CODER_URN)
+              .put(ByteArrayCoder.class, ModelCoders.BYTES_CODER_URN)
+              .put(BooleanCoder.class, ModelCoders.BOOL_CODER_URN)
+              .put(StringUtf8Coder.class, ModelCoders.STRING_UTF8_CODER_URN)
+              .put(KvCoder.class, ModelCoders.KV_CODER_URN)
+              .put(VarLongCoder.class, ModelCoders.INT64_CODER_URN)
+              .put(IntervalWindowCoder.class, ModelCoders.INTERVAL_WINDOW_CODER_URN)
+              .put(IterableCoder.class, ModelCoders.ITERABLE_CODER_URN)
+              .put(Timer.Coder.class, ModelCoders.TIMER_CODER_URN)
+              .put(LengthPrefixCoder.class, ModelCoders.LENGTH_PREFIX_CODER_URN)
+              .put(GlobalWindow.Coder.class, ModelCoders.GLOBAL_WINDOW_CODER_URN)
+              .put(FullWindowedValueCoder.class, ModelCoders.WINDOWED_VALUE_CODER_URN)
+              .put(DoubleCoder.class, ModelCoders.DOUBLE_CODER_URN)
+              .build();
+    } catch (ClassNotFoundException e) {
+      throw new RuntimeException(e);
+    }
+  }
 
   public static final Set<String> WELL_KNOWN_CODER_URNS = BEAM_MODEL_CODER_URNS.values();
 
   @VisibleForTesting
-  static final Map<Class<? extends Coder>, CoderTranslator<? extends Coder>> BEAM_MODEL_CODERS =
-      ImmutableMap.<Class<? extends Coder>, CoderTranslator<? extends Coder>>builder()
-          .put(ByteArrayCoder.class, CoderTranslators.atomic(ByteArrayCoder.class))
-          .put(BooleanCoder.class, CoderTranslators.atomic(BooleanCoder.class))
-          .put(StringUtf8Coder.class, CoderTranslators.atomic(StringUtf8Coder.class))
-          .put(VarLongCoder.class, CoderTranslators.atomic(VarLongCoder.class))
-          .put(IntervalWindowCoder.class, CoderTranslators.atomic(IntervalWindowCoder.class))
-          .put(GlobalWindow.Coder.class, CoderTranslators.atomic(GlobalWindow.Coder.class))
-          .put(KvCoder.class, CoderTranslators.kv())
-          .put(IterableCoder.class, CoderTranslators.iterable())
-          .put(Timer.Coder.class, CoderTranslators.timer())
-          .put(LengthPrefixCoder.class, CoderTranslators.lengthPrefix())
-          .put(FullWindowedValueCoder.class, CoderTranslators.fullWindowedValue())
-          .put(DoubleCoder.class, CoderTranslators.atomic(DoubleCoder.class))
-          .build();
+  static final Map<Class<? extends Coder>, CoderTranslator<? extends Coder>> BEAM_MODEL_CODERS;
 
   static {
+    try {
+      BEAM_MODEL_CODERS =
+          ImmutableMap.<Class<? extends Coder>, CoderTranslator<? extends Coder>>builder()
+              .put(
+                  (Class<? extends Coder>)
+                      Class.forName(
+                          "org.apache.beam.sdk.io.gcp.pubsub.PubsubMessageWithAttributesCoder"),
+                  CoderTranslators.atomic(
+                      (Class<? extends Coder>)
+                          Class.forName(
+                              "org.apache.beam.sdk.io.gcp.pubsub.PubsubMessageWithAttributesCoder")))
+              .put(
+                  (Class<? extends Coder>)
+                      Class.forName(
+                          "org.apache.beam.sdk.io.gcp.pubsub.PubsubMessagePayloadOnlyCoder"),
+                  CoderTranslators.atomic(
+                      (Class<? extends Coder>)
+                          Class.forName(
+                              "org.apache.beam.sdk.io.gcp.pubsub.PubsubMessagePayloadOnlyCoder")))
+              .put(ByteArrayCoder.class, CoderTranslators.atomic(ByteArrayCoder.class))
+              .put(BooleanCoder.class, CoderTranslators.atomic(BooleanCoder.class))
+              .put(StringUtf8Coder.class, CoderTranslators.atomic(StringUtf8Coder.class))
+              .put(VarLongCoder.class, CoderTranslators.atomic(VarLongCoder.class))
+              .put(IntervalWindowCoder.class, CoderTranslators.atomic(IntervalWindowCoder.class))
+              .put(GlobalWindow.Coder.class, CoderTranslators.atomic(GlobalWindow.Coder.class))
+              .put(KvCoder.class, CoderTranslators.kv())
+              .put(IterableCoder.class, CoderTranslators.iterable())
+              .put(Timer.Coder.class, CoderTranslators.timer())
+              .put(LengthPrefixCoder.class, CoderTranslators.lengthPrefix())
+              .put(FullWindowedValueCoder.class, CoderTranslators.fullWindowedValue())
+              .put(DoubleCoder.class, CoderTranslators.atomic(DoubleCoder.class))
+              .build();
+    } catch (ClassNotFoundException e) {
+      throw new RuntimeException(e);
+    }
     checkState(
         BEAM_MODEL_CODERS.keySet().containsAll(BEAM_MODEL_CODER_URNS.keySet()),
         "Every Model %s must have an associated %s. Missing: %s",
