@@ -104,6 +104,13 @@ func main() {
 		filepath.Join(jarsDir, "beam-sdks-java-harness.jar"),
 		filepath.Join(jarsDir, "beam-sdks-java-io-kafka.jar"),
 		filepath.Join(jarsDir, "kafka-clients.jar"),
+		filepath.Join(jarsDir, "beam-sdks-java-io-google-cloud-platform.jar"),
+		filepath.Join(jarsDir, "beam-sdks-java-extensions-protobuf.jar"),
+		filepath.Join(jarsDir, "proto-google-cloud-pubsub-v1-1.43.0.jar"),
+		filepath.Join(jarsDir, "proto-google-common-protos-1.12.0.jar"),
+		filepath.Join(jarsDir, "protobuf-java-3.6.1.jar"),
+		filepath.Join(jarsDir, "protobuf-java-util-3.6.1.jar"),
+		filepath.Join(jarsDir, "google-api-services-pubsub-v1-rev20181105-1.27.0.jar"),
 	}
 
 	var hasWorkerExperiment = strings.Contains(options, "use_staged_dataflow_worker_jar")
