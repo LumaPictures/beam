@@ -89,7 +89,8 @@ public class Environments {
    * container.
    */
   private static final String JAVA_SDK_HARNESS_CONTAINER_URL =
-      String.format("%s-docker-apache.bintray.io/beam/java", System.getenv("USER"));
+      Optional.ofNullable(System.getenv("BEAM_SDK_JAVA_CONTAINER")).orElse(
+              String.format("%s-docker-apache.bintray.io/beam/java", System.getenv("USER")));
   public static final Environment JAVA_SDK_HARNESS_ENVIRONMENT =
       createDockerEnvironment(JAVA_SDK_HARNESS_CONTAINER_URL);
 
