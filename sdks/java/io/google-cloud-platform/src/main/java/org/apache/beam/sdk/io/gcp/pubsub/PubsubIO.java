@@ -813,8 +813,8 @@ public class PubsubIO {
           this.timestampAttribute = timestampAttribute;
         }
 
-        public void setWithAttributes(Long needsAttributes) {
-          this.needsAttributes = needsAttributes >= 1;
+        public void setWithAttributes(Boolean needsAttributes) {
+          this.needsAttributes = needsAttributes;
         }
       }
     }
