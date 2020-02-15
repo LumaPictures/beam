@@ -57,6 +57,8 @@ var (
 	provisionEndpoint = flag.String("provision_endpoint", "", "Provision endpoint (required).")
 	controlEndpoint   = flag.String("control_endpoint", "", "Control endpoint (required).")
 	semiPersistDir    = flag.String("semi_persist_dir", "/tmp", "Local semi-persistent directory (optional).")
+	// this allows us to switch the python executable if needed (for example for use in DCC application)
+	pythonExec        = flag.String("python_executable", "python", "Python executable to use (optional).")
 )
 
 const (
@@ -192,9 +194,9 @@ func main() {
 		"-m",
 		sdkHarnessEntrypoint,
 	}
-	log.Printf("Executing: python %v", strings.Join(args, " "))
+	log.Printf("Executing: %s %v", *pythonExec, strings.Join(args, " "))
 
-	log.Fatalf("Python exited: %v", execx.Execute("python", args...))
+	log.Fatalf("Python exited: %v", execx.Execute(*pythonExec, args...))
 }
 
 // setup wheel specs according to installed python version
