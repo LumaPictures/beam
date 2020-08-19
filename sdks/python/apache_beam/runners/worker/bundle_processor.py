@@ -979,25 +979,7 @@ class BundleProcessor(object):
         timer_info.output_stream = output_stream
         self.ops[transform_id].add_timer_info(timer_family_id, timer_info)
 
-      task_helper = BundleProcessorTaskHelper(instruction_id,
-                                              use_task_worker=use_task_worker)
       # Process data and timer inputs
-      for data_channel, expected_inputs in data_channels.items():
-        for element in data_channel.input_elements(instruction_id,
-                                                   expected_inputs):
-          if isinstance(element, beam_fn_api_pb2.Elements.Timers):
-            timer_coder_impl = (
-                self.timers_info[(
-                    element.transform_id,
-                    element.timer_family_id)].timer_coder_impl)
-            for timer_data in timer_coder_impl.decode_all(element.timers):
-              self.ops[element.transform_id].process_timer(
-                  element.timer_family_id, timer_data)
-          elif isinstance(element, beam_fn_api_pb2.Elements.Data):
-            input_op = input_op_by_transform_id[element.transform_id]
-            # decode inputs to inspect if it is wrapped
-            task_helper.process_encoded(input_op, element)
-
       delayed_applications, requires_finalization = \
         self.maybe_process_remotely(data_channels, instruction_id,
                                     input_op_by_transform_id,
@@ -1050,41 +1032,50 @@ class BundleProcessor(object):
     for data_channel, expected_transforms in data_channels.items():
       for data in data_channel.input_elements(
             instruction_id, expected_transforms):
-        input_op = input_op_by_transform_id[data.transform_id]
+        if isinstance(data, beam_fn_api_pb2.Elements.Timers):
+          timer_coder_impl = (
+            self.timers_info[(
+              data.transform_id,
+              data.timer_family_id)].timer_coder_impl)
+          for timer_data in timer_coder_impl.decode_all(data.timers):
+            self.ops[data.transform_id].process_timer(
+              data.timer_family_id, timer_data)
+        elif isinstance(data, beam_fn_api_pb2.Elements.Data):
+          input_op = input_op_by_transform_id[data.transform_id]
 
-        # process normally if not using task worker
-        if use_task_worker is False:
-          input_op.process_encoded(data.data)
-          continue
+          # process normally if not using task worker
+          if use_task_worker is False:
+            input_op.process_encoded(data.data)
+            continue
 
-        # decode inputs to inspect if it is wrapped
-        input_stream = coder_impl.create_InputStream(data.data)
-        # TODO: Come up with a better solution here?
-        # here we maintain two separate input stream, because `.pos` is not
-        # accessible on the cython version of InputStream object, so we can't re
-        # -use the same input stream object and edit the pos to move the read
-        # handle back
-        raw_input_stream = coder_impl.create_InputStream(data.data)
+          # decode inputs to inspect if it is wrapped
+          input_stream = coder_impl.create_InputStream(data.data)
+          # TODO: Come up with a better solution here?
+          # here we maintain two separate input stream, because `.pos` is not
+          # accessible on the cython version of InputStream object, so we can't
+          # re-use the same input stream object and edit the pos to move the
+          # read handle back
+          raw_input_stream = coder_impl.create_InputStream(data.data)
 
-        while input_stream.size() > 0:
-          starting_size = input_stream.size()
-          decoded_value = input_op.windowed_coder_impl.decode_from_stream(
-            input_stream, True)
-          cur_size = input_stream.size()
-          raw_bytes = raw_input_stream.read(starting_size - cur_size)
-          # make sure these two stream stays in sync in size
-          assert raw_input_stream.size() == input_stream.size()
-          if decoded_value.value and get_taskable_value(decoded_value.value):
-            # save this to process later in ``process_bundle_with_task_workers``
-            wrapped_values[data.transform_id].append(
-              (get_taskable_value(decoded_value.value), raw_bytes))
-          else:
-            # fallback to process it as normal, trigger receivers to process
-            with input_op.splitting_lock:
-              if input_op.index == input_op.stop - 1:
-                return
-              input_op.index += 1
-            input_op.output(decoded_value)
+          while input_stream.size() > 0:
+            starting_size = input_stream.size()
+            decoded_value = input_op.windowed_coder_impl.decode_from_stream(
+              input_stream, True)
+            cur_size = input_stream.size()
+            raw_bytes = raw_input_stream.read(starting_size - cur_size)
+            # make sure these two stream stays in sync in size
+            assert raw_input_stream.size() == input_stream.size()
+            if decoded_value.value and get_taskable_value(decoded_value.value):
+              # save this to process later in ``process_bundle_with_task_workers``
+              wrapped_values[data.transform_id].append(
+                (get_taskable_value(decoded_value.value), raw_bytes))
+            else:
+              # fallback to process it as normal, trigger receivers to process
+              with input_op.splitting_lock:
+                if input_op.index == input_op.stop - 1:
+                  return
+                input_op.index += 1
+              input_op.output(decoded_value)
 
     if wrapped_values:
       task_helper = BundleProcessorTaskHelper(instruction_id, wrapped_values)

@@ -48,11 +48,12 @@ from apache_beam.portability.api import beam_fn_api_pb2_grpc
 from apache_beam.portability.api import beam_task_worker_pb2
 from apache_beam.portability.api import beam_task_worker_pb2_grpc
 from apache_beam.portability.api import endpoints_pb2
-from apache_beam.runners.portability.fn_api_runner import ControlConnection
-from apache_beam.runners.portability.fn_api_runner import ControlFuture
+from apache_beam.runners.portability.fn_api_runner.worker_handlers import ControlConnection
+from apache_beam.runners.portability.fn_api_runner.worker_handlers import ControlFuture
 from apache_beam.runners.portability.fn_api_runner import FnApiRunner
-from apache_beam.runners.portability.fn_api_runner import GrpcWorkerHandler
-from apache_beam.runners.portability.fn_api_runner import WorkerHandler
+from apache_beam.runners.portability.fn_api_runner.worker_handlers import GrpcWorkerHandler
+from apache_beam.runners.portability.fn_api_runner.worker_handlers import GrpcStateServicer
+from apache_beam.runners.portability.fn_api_runner.worker_handlers import WorkerHandler
 from apache_beam.runners.worker.bundle_processor import BundleProcessor
 from apache_beam.runners.worker.channel_factory import GRPCChannelFactory
 from apache_beam.runners.worker.data_plane import _GrpcDataChannel
@@ -193,7 +194,7 @@ class TaskWorkerHandler(GrpcWorkerHandler):
     # type: () -> None
     import entrypoints
     for name, entry_point in entrypoints.get_group_named(
-        'apache_beam_task_workers_plugins').iteritems():
+        ENTRY_POINT_NAME).iteritems():
       logging.info('Loading entry point: {}'.format(name))
       entry_point.load()
 
@@ -372,7 +373,7 @@ class TaskGrpcServer(object):
 
     beam_fn_api_pb2_grpc.add_BeamFnStateServicer_to_server(
       TaskStateServicer(self.state_handler, instruction_id,
-                        state_handler._context.cache_token),
+                        state_handler._context.bundle_cache_token),
       self.state_server)
 
     logging.info('starting control server on port %s', self.control_port)
@@ -655,7 +656,7 @@ class TaskFnDataServicer(beam_task_worker_pb2_grpc.TaskFnDataServicer):
 # =====
 # State
 # =====
-class TaskStateServicer(FnApiRunner.GrpcStateServicer):
+class TaskStateServicer(GrpcStateServicer):
 
   def __init__(self, state, instruction_id, cache_token):
     # type: (CachingStateHandler, str, Optional[str]) -> None
@@ -983,11 +984,9 @@ class BundleProcessorTaskHelper(object):
     Args:
       process_bundle_descriptor: the ProcessBundleDescriptor proto
     """
-    from apache_beam.portability.api import beam_runner_api_pb2
-    from apache_beam.runners.portability.fn_api_runner_transforms import \
+    from apache_beam.runners.portability.fn_api_runner.translations import \
       PAR_DO_URNS
     from apache_beam.transforms.environments import Environment
-    from apache_beam.utils import proto_utils
 
     # find a ParDo xform in this stage
     pardo = None
@@ -1001,11 +1000,8 @@ class BundleProcessorTaskHelper(object):
       # FIXME: Use the pipeline default env here?
       return None
 
-    pardo_payload = proto_utils.parse_Bytes(
-      pardo.spec.payload,
-      beam_runner_api_pb2.ParDoPayload)
     env_proto = process_bundle_descriptor.environments.get(
-      pardo_payload.do_fn.environment_id)
+      pardo.environment_id)
 
     return Environment.from_runner_api(env_proto, None)
 
