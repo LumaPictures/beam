@@ -179,6 +179,10 @@ func main() {
 	os.Setenv("SEMI_PERSISTENT_DIRECTORY", *semiPersistDir)
 	os.Setenv("LOGGING_API_SERVICE_DESCRIPTOR", proto.MarshalTextString(&pipepb.ApiServiceDescriptor{Url: *loggingEndpoint}))
 	os.Setenv("CONTROL_API_SERVICE_DESCRIPTOR", proto.MarshalTextString(&pipepb.ApiServiceDescriptor{Url: *controlEndpoint}))
+	// we need to record the other endpoints here because task worker need to use boot to setup the environment for
+	// the sdk harness as well
+	os.Setenv("ARTIFACT_API_SERVICE_DESCRIPTOR", proto.MarshalTextString(&pipepb.ApiServiceDescriptor{Url: *artifactEndpoint}))
+	os.Setenv("PROVISION_API_SERVICE_DESCRIPTOR", proto.MarshalTextString(&pipepb.ApiServiceDescriptor{Url: *provisionEndpoint}))
 
 	if info.GetStatusEndpoint() != nil {
 		os.Setenv("STATUS_API_SERVICE_DESCRIPTOR", proto.MarshalTextString(info.GetStatusEndpoint()))
