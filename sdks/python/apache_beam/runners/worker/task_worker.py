@@ -19,6 +19,7 @@ from __future__ import absolute_import
 from __future__ import division
 
 import collections
+import copy
 import logging
 import queue
 import os
@@ -45,9 +46,12 @@ from future.utils import raise_
 
 from apache_beam.portability.api import beam_fn_api_pb2
 from apache_beam.portability.api import beam_fn_api_pb2_grpc
+from apache_beam.portability.api import beam_provision_api_pb2
+from apache_beam.portability.api import beam_provision_api_pb2_grpc
 from apache_beam.portability.api import beam_task_worker_pb2
 from apache_beam.portability.api import beam_task_worker_pb2_grpc
 from apache_beam.portability.api import endpoints_pb2
+from apache_beam.runners.portability.fn_api_runner.worker_handlers import BasicProvisionService
 from apache_beam.runners.portability.fn_api_runner.worker_handlers import ControlConnection
 from apache_beam.runners.portability.fn_api_runner.worker_handlers import ControlFuture
 from apache_beam.runners.portability.fn_api_runner import FnApiRunner
@@ -57,13 +61,12 @@ from apache_beam.runners.portability.fn_api_runner.worker_handlers import Worker
 from apache_beam.runners.worker.bundle_processor import BundleProcessor
 from apache_beam.runners.worker.channel_factory import GRPCChannelFactory
 from apache_beam.runners.worker.data_plane import _GrpcDataChannel
-from apache_beam.runners.worker.data_plane import ClosableOutputStream
+from apache_beam.runners.worker.data_plane import SizeBasedBufferingClosableOutputStream
 from apache_beam.runners.worker.data_plane import DataChannelFactory
 from apache_beam.runners.worker.statecache import StateCache
 from apache_beam.runners.worker.worker_id_interceptor import WorkerIdInterceptor
 
 if TYPE_CHECKING:
-  from apache_beam.portability.api import beam_provision_api_pb2
   from apache_beam.runners.portability.fn_api_runner import ExtendedProvisionInfo
   from apache_beam.runners.worker.data_plane import DataChannelFactory
   from apache_beam.runners.worker.sdk_worker import CachingStateHandler
@@ -161,12 +164,20 @@ class TaskWorkerHandler(GrpcWorkerHandler):
       self.worker_id = worker_id
 
     self.control_address = self.port_from_worker(self._grpc_server.control_port)
+    self.provision_address = self.control_address
     self.logging_address = self.port_from_worker(
       self.get_port_from_env_var('LOGGING_API_SERVICE_DESCRIPTOR'))
     self.artifact_address = self.port_from_worker(
         self.get_port_from_env_var('ARTIFACT_API_SERVICE_DESCRIPTOR'))
-    self.provision_address = self.port_from_worker(
-        self.get_port_from_env_var('PROVISION_API_SERVICE_DESCRIPTOR'))
+
+    # modify provision info
+    modified_provision = copy.copy(provision_info)
+    modified_provision.control_endpoint.url = self.control_address
+    modified_provision.logging_endpoint.url = self.logging_address
+    modified_provision.artifact_endpoint.url = self.artifact_address
+    with TaskProvisionServicer._lock:
+      self._grpc_server.provision_handler.provision_by_worker_id[
+        self.worker_id] = modified_provision
 
     self.control_conn = self._grpc_server.control_handler.get_conn_by_worker_id(
       self.worker_id)
@@ -176,12 +187,14 @@ class TaskWorkerHandler(GrpcWorkerHandler):
     self.credentials = credentials
     self.alive = True
 
-  def host_from_worker(self):
+  @staticmethod
+  def host_from_worker():
     # type: () -> str
     import socket
     return socket.getfqdn()
 
-  def get_port_from_env_var(self, env_var):
+  @staticmethod
+  def get_port_from_env_var(env_var):
     # type: (str) -> str
     """Extract the service port for a given environment variable."""
     from google.protobuf import text_format
@@ -318,7 +331,7 @@ class TaskGrpcServer(object):
   ``TaskWorker`` and ``TaskWorkerHandler``.
 
   Contains three servers:
-  - a control server hosting ``TaskControlService``
+  - a control server hosting ``TaskControlService`` amd `TaskProvisionService`
   - a data server hosting ``TaskFnDataService``
   - a state server hosting ``TaskStateService``
 
@@ -332,7 +345,8 @@ class TaskGrpcServer(object):
                max_workers,  # type: int
                data_store,  # type: Mapping[str, List[beam_fn_api_pb2.Elements.Data]]
                data_channel_factory,  # type: DataChannelFactory
-               instruction_id  # type: str
+               instruction_id,  # type: str
+               provision_info,  # type: Union[beam_provision_api_pb2.ProvisionInfo, ExtendedProvisionInfo]
               ):
     # type: (...) -> None
     self.state_handler = state_handler
@@ -362,8 +376,9 @@ class TaskGrpcServer(object):
     self.control_handler = TaskControlServicer()
     beam_task_worker_pb2_grpc.add_TaskControlServicer_to_server(
       self.control_handler, self.control_server)
-    # TODO: When we add provision / staging service, it needs to be added to the
-    #  control server too
+    self.provision_handler = TaskProvisionServicer(provision_info=provision_info)
+    beam_provision_api_pb2_grpc.add_ProvisionServiceServicer_to_server(
+      self.provision_handler, self.control_server)
 
     self.data_plane_handler = TaskFnDataServicer(data_store,
                                                  data_channel_factory,
@@ -532,6 +547,11 @@ class ProxyGrpcClientDataChannelFactory(DataChannelFactory):
 
   def create_data_channel(self, remote_grpc_port):
     # type: (beam_fn_api_pb2.RemoteGrpcPort) -> ProxyGrpcClientDataChannel
+    url = remote_grpc_port.api_service_descriptor.url
+    return self.create_data_channel_from_url(url)
+
+  def create_data_channel_from_url(self, url):
+    # type: (str) -> ProxyGrpcClientDataChannel
     channel_options = [("grpc.max_receive_message_length", -1),
                        ("grpc.max_send_message_length", -1)]
     if self._credentials is None:
@@ -541,7 +561,7 @@ class ProxyGrpcClientDataChannelFactory(DataChannelFactory):
       grpc_channel = GRPCChannelFactory.secure_channel(
         self.transmitter_url, self._credentials, options=channel_options)
     return ProxyGrpcClientDataChannel(
-      remote_grpc_port.api_service_descriptor.url,
+      url,
       beam_task_worker_pb2_grpc.TaskFnDataStub(grpc_channel))
 
   def close(self):
@@ -564,6 +584,8 @@ class ProxyGrpcClientDataChannel(_GrpcDataChannel):
                      abort_callback=None  # type: Optional[Callable[[], bool]]
                     ):
     # type: (...) -> Iterator[beam_fn_api_pb2.Elements.Data]
+    if not expected_transforms:
+      return
     req = beam_task_worker_pb2.ReceiveRequest(
       instruction_id=instruction_id,
       client_data_endpoint=self.client_url)
@@ -587,7 +609,7 @@ class ProxyGrpcClientDataChannel(_GrpcDataChannel):
         return
 
   def output_stream(self, instruction_id, transform_id):
-    # type: (str, str) -> ClosableOutputStream
+    # type: (str, str) -> SizeBasedBufferingClosableOutputStream
 
     def _add_to_send_queue(data):
       if data:
@@ -606,7 +628,7 @@ class ProxyGrpcClientDataChannel(_GrpcDataChannel):
       # when the whole bundle finishes, the bundle processor original output
       # stream will send that to runner
 
-    return ClosableOutputStream(
+    return SizeBasedBufferingClosableOutputStream(
       close_callback, flush_callback=_add_to_send_queue)
 
 
@@ -698,6 +720,38 @@ class TaskStateServicer(GrpcStateServicer):
           clear=beam_fn_api_pb2.StateClearResponse())
       else:
         raise NotImplementedError('Unknown state request: %s' % request_type)
+
+
+# =====
+# Provision
+# =====
+class TaskProvisionServicer(BasicProvisionService):
+  """
+  Provide provision info for remote task workers, provision is static because
+  for each bundle the provision info is static.
+  """
+
+  _lock = threading.Lock()
+
+  def __init__(self, provision_info=None):
+    # type: (Optional[beam_provision_api_pb2.ProvisionInfo]) -> None
+    self._provision_info = provision_info
+    self.provision_by_worker_id = dict()
+
+  def GetProvisionInfo(self, request, context=None):
+    # type: (...) -> beam_provision_api_pb2.GetProvisionInfoResponse
+    # if request comes from task worker that can be found, return the modified
+    #  provision info
+    if context:
+      worker_id = dict(context.invocation_metadata())['worker_id']
+      provision_info = self.provision_by_worker_id.get(worker_id,
+                                                       self._provision_info)
+    else:
+      # fallback to the generic sdk worker version of provision info if not
+      # found from a cached task worker
+      provision_info = self._provision_info
+
+    return beam_provision_api_pb2.GetProvisionInfoResponse(info=provision_info)
 
 
 class BundleProcessorTaskWorker(object):
@@ -959,7 +1013,8 @@ class BundleProcessorTaskHelper(object):
                               max_workers,  # type: int
                               data_store,  # type: Mapping[str, List[beam_fn_api_pb2.Elements.Data]]
                               state_handler,  # type: CachingStateHandler
-                              data_channel_factory  # type: DataChannelFactory
+                              data_channel_factory,  # type: DataChannelFactory
+                              provision_info,  # type: beam_provision_api_pb2.ProvisionInfo
                              ):
     # type:(...) -> TaskGrpcServer
     """Start up TaskGrpcServer.
@@ -972,7 +1027,8 @@ class BundleProcessorTaskHelper(object):
       data_channel_factory: data channel factory of current BundleProcessor
     """
     return TaskGrpcServer(state_handler, max_workers, data_store,
-                          data_channel_factory, self.instruction_id)
+                          data_channel_factory, self.instruction_id,
+                          provision_info)
 
   @staticmethod
   def get_default_task_env(process_bundle_descriptor):
@@ -1005,6 +1061,23 @@ class BundleProcessorTaskHelper(object):
 
     return Environment.from_runner_api(env_proto, None)
 
+  def get_sdk_worker_provision_info(self, server_url):
+    # type:(str) -> beam_provision_api_pb2.ProvisionInfo
+    channel_options = [("grpc.max_receive_message_length", -1),
+                       ("grpc.max_send_message_length", -1)]
+    channel = GRPCChannelFactory.insecure_channel(server_url,
+                                                  options=channel_options)
+
+    worker_id = os.environ['WORKER_ID']
+    # add sdk worker id to grpc channel
+    channel = grpc.intercept_channel(channel, WorkerIdInterceptor(worker_id))
+
+    provision_stub = beam_provision_api_pb2_grpc.ProvisionServiceStub(channel)
+    response = provision_stub.GetProvisionInfo(
+      beam_provision_api_pb2.GetProvisionInfoRequest())
+    channel.close()
+    return response.info
+
   def process_bundle_with_task_workers(self,
                                        state_handler,  # type: CachingStateHandler
                                        data_channel_factory,  # type: DataChannelFactory
@@ -1024,6 +1097,8 @@ class BundleProcessorTaskHelper(object):
       process_bundle_descriptor: a description of the stage that this
         ``BundleProcessor``is to execute.
     """
+    from google.protobuf import text_format
+
     default_env = self.get_default_task_env(process_bundle_descriptor)
     # start up grpc server
     splitted_elements, data_store = self.split_taskable_values()
@@ -1033,14 +1108,23 @@ class BundleProcessorTaskHelper(object):
         'Number of element exceeded MAX_TASK_WORKERS ({})'.format(
           MAX_TASK_WORKERS))
       num_task_workers = MAX_TASK_WORKERS
+
+    # get sdk worker provision info first
+    provision_port = TaskWorkerHandler.get_port_from_env_var(
+      'PROVISION_API_SERVICE_DESCRIPTOR')
+    provision_info = self.get_sdk_worker_provision_info('{}:{}'.format(
+      TaskWorkerHandler.host_from_worker(), provision_port))
+
     server = self._start_task_grpc_server(num_task_workers, data_store,
-                                          state_handler, data_channel_factory)
+                                          state_handler, data_channel_factory,
+                                          provision_info)
+    # modify provision api service descriptor to use the new address that we are
+    #  gonna be using (the control address)
+    os.environ['PROVISION_API_SERVICE_DESCRIPTOR'] = text_format.MessageToString(
+      endpoints_pb2.ApiServiceDescriptor(url=server.control_address))
 
     # create TaskWorkerHandlers
     task_worker_handlers = []
-    # FIXME: leaving out provision info for now, it should come from
-    #  Environment
-    provision_info = None
     for worker_id, elem in splitted_elements.iteritems():
       taskable_value = get_taskable_value(elem)
       # set the env to default env if there is
