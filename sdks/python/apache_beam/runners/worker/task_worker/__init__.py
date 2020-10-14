@@ -67,7 +67,7 @@ from apache_beam.runners.worker.statecache import StateCache
 from apache_beam.runners.worker.worker_id_interceptor import WorkerIdInterceptor
 
 if TYPE_CHECKING:
-  from apache_beam.runners.portability.fn_api_runner import ExtendedProvisionInfo
+  from apache_beam.runners.portability.fn_api_runner.fn_runner import ExtendedProvisionInfo
   from apache_beam.runners.worker.data_plane import DataChannelFactory
   from apache_beam.runners.worker.sdk_worker import CachingStateHandler
   from apache_beam.transforms.environments import Environment
@@ -216,7 +216,7 @@ class TaskWorkerHandler(GrpcWorkerHandler):
     # type: () -> None
     import entrypoints
     for name, entry_point in entrypoints.get_group_named(
-        ENTRY_POINT_NAME).iteritems():
+        ENTRY_POINT_NAME).items():
       logging.info('Loading entry point: {}'.format(name))
       entry_point.load()
 
@@ -1005,7 +1005,7 @@ class BundleProcessorTaskHelper(object):
     splitted = collections.defaultdict(list)
     data_store = collections.defaultdict(list)
     worker_count = 0
-    for ptransform_id, values in self.wrapped_values.iteritems():
+    for ptransform_id, values in self.wrapped_values.items():
       for decoded, raw in values:
         worker_id = 'worker_{}'.format(worker_count)
         splitted[worker_id].append(decoded)
@@ -1055,7 +1055,7 @@ class BundleProcessorTaskHelper(object):
 
     # find a ParDo xform in this stage
     pardo = None
-    for _, xform in process_bundle_descriptor.transforms.iteritems():
+    for _, xform in process_bundle_descriptor.transforms.items():
       if xform.spec.urn in PAR_DO_URNS:
         pardo = xform
         break
@@ -1141,7 +1141,7 @@ class BundleProcessorTaskHelper(object):
 
     # create TaskWorkerHandlers
     task_worker_handlers = []
-    for worker_id, elem in splitted_elements.iteritems():
+    for worker_id, elem in splitted_elements.items():
       taskable_value = get_taskable_value(elem)
       # set the env to default env if there is
       if taskable_value.env is None and default_env:
