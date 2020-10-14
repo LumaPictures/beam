@@ -167,8 +167,17 @@ class TaskWorkerHandler(GrpcWorkerHandler):
     self.provision_address = self.control_address
     self.logging_address = self.port_from_worker(
       self.get_port_from_env_var('LOGGING_API_SERVICE_DESCRIPTOR'))
-    self.artifact_address = self.port_from_worker(
-        self.get_port_from_env_var('ARTIFACT_API_SERVICE_DESCRIPTOR'))
+    # if we are running from subprocess environment, the aritfact staging
+    # endpoint is the same as control end point, and the env var won't be
+    # recorded so use control end point and record that to artifact
+    try:
+      self.artifact_address = self.port_from_worker(
+          self.get_port_from_env_var('ARTIFACT_API_SERVICE_DESCRIPTOR'))
+    except KeyError:
+      self.artifact_address = self.port_from_worker(
+          self.get_port_from_env_var('CONTROL_API_SERVICE_DESCRIPTOR'))
+      os.environ['ARTIFACT_API_SERVICE_DESCRIPTOR'] = os.environ[
+        'CONTROL_API_SERVICE_DESCRIPTOR']
 
     # modify provision info
     modified_provision = copy.copy(provision_info)
@@ -1110,10 +1119,17 @@ class BundleProcessorTaskHelper(object):
       num_task_workers = MAX_TASK_WORKERS
 
     # get sdk worker provision info first
-    provision_port = TaskWorkerHandler.get_port_from_env_var(
-      'PROVISION_API_SERVICE_DESCRIPTOR')
-    provision_info = self.get_sdk_worker_provision_info('{}:{}'.format(
-      TaskWorkerHandler.host_from_worker(), provision_port))
+    try:
+      provision_port = TaskWorkerHandler.get_port_from_env_var(
+        'PROVISION_API_SERVICE_DESCRIPTOR')
+    except KeyError:
+      # if we are in subprocess environment then there won't be any provision
+      # service so use default provison info
+      provision_info = beam_provision_api_pb2.ProvisionInfo()
+
+    else:
+      provision_info = self.get_sdk_worker_provision_info('{}:{}'.format(
+        TaskWorkerHandler.host_from_worker(), provision_port))
 
     server = self._start_task_grpc_server(num_task_workers, data_store,
                                           state_handler, data_channel_factory,
