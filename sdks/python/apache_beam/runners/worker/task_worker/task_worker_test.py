@@ -35,14 +35,14 @@ from apache_beam.portability.api import beam_fn_api_pb2
 from apache_beam.portability.api import beam_runner_api_pb2
 from apache_beam.portability.api import beam_task_worker_pb2
 from apache_beam.portability.api import endpoints_pb2
-from apache_beam.runners.worker import task_worker
+from apache_beam.runners.worker.task_worker import handlers
 from apache_beam.runners.worker.data_plane import GrpcClientDataChannelFactory
 from apache_beam.runners.worker.sdk_worker import CachingStateHandler
 from apache_beam.transforms import window
 
 
 # -- utilities for testing, mocking up test objects
-class _MockBundleProcessorTaskWorker(task_worker.BundleProcessorTaskWorker):
+class _MockBundleProcessorTaskWorker(handlers.BundleProcessorTaskWorker):
   """
   A mocked version of BundleProcessorTaskWorker, responsible for recording the
   requests it received, and provide response to each request type by a passed
@@ -65,8 +65,8 @@ class _MockBundleProcessorTaskWorker(task_worker.BundleProcessorTaskWorker):
     return self.responsesByRequestType.get(request_type)
 
 
-@task_worker.TaskWorkerHandler.register_urn('unittest')
-class _MockTaskWorkerHandler(task_worker.TaskWorkerHandler):
+@handlers.TaskWorkerHandler.register_urn('unittest')
+class _MockTaskWorkerHandler(handlers.TaskWorkerHandler):
   """
   Register a mocked version of task handler only used for "unittest"; will start
   a ``_MockBundleProcessorTaskWorker`` for each discovered TaskableValue.
@@ -112,7 +112,7 @@ class _MockTaskWorkerHandler(task_worker.TaskWorkerHandler):
     return self.start_remote()
 
 
-class _MockTaskGrpcServer(task_worker.TaskGrpcServer):
+class _MockTaskGrpcServer(handlers.TaskGrpcServer):
   """
   Mocked version of TaskGrpcServer, using mocked version of data channel factory
   and cache handler.
@@ -363,9 +363,9 @@ class BundleProcessorTaskHelperTest(unittest.TestCase):
     # so it will be recorded in the `decoded` list
     self.assertEquals(mocked_op.decoded, test_elems)
 
-  @mock.patch.object(task_worker, 'MAX_TASK_WORKER_RETRY', 2)
+  @mock.patch.object(handlers, 'MAX_TASK_WORKER_RETRY', 2)
   @mock.patch('__main__._MockTaskWorkerHandler.execute',
-              side_effect=task_worker.TaskWorkerProcessBundleError('test'))
+              side_effect=handlers.TaskWorkerProcessBundleError('test'))
   @mock.patch('__main__._MockTaskWorkerHandler.start_worker')
   @mock.patch('__main__._MockTaskWorkerHandler.stop_worker')
   def test_exceed_max_retries(self, unused_mock_stop, unused_mock_start,
@@ -379,7 +379,7 @@ class BundleProcessorTaskHelperTest(unittest.TestCase):
     test_coder = self._get_test_pickle_coder()
 
     test_elems = self._prep_elements(
-      [task_worker.TaskableValue(i, 'unittest') for i in range(2)]
+      [handlers.TaskableValue(i, 'unittest') for i in range(2)]
     )
     instruction_id = 'test_instruction_3'
     transform_id = 'test_transform_1'
