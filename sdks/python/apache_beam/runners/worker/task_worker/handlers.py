@@ -54,7 +54,6 @@ from apache_beam.portability.api import endpoints_pb2
 from apache_beam.runners.portability.fn_api_runner.worker_handlers import BasicProvisionService
 from apache_beam.runners.portability.fn_api_runner.worker_handlers import ControlConnection
 from apache_beam.runners.portability.fn_api_runner.worker_handlers import ControlFuture
-from apache_beam.runners.portability.fn_api_runner import FnApiRunner
 from apache_beam.runners.portability.fn_api_runner.worker_handlers import GrpcWorkerHandler
 from apache_beam.runners.portability.fn_api_runner.worker_handlers import GrpcStateServicer
 from apache_beam.runners.portability.fn_api_runner.worker_handlers import WorkerHandler
@@ -87,8 +86,8 @@ class TaskableValue(object):
   """
   Value that can be distributed to TaskWorkers as tasks.
 
-  Has the original value, and TaskProperties that specifies how the task will be
-  generated.
+  Has the original value, and TaskProperties that specifies how the task will
+  be generated.
   """
 
   def __init__(
@@ -338,8 +337,7 @@ class TaskWorkerHandler(GrpcWorkerHandler):
 
 
 class TaskGrpcServer(object):
-  """
-  A collection of grpc servicers that handle communication between a
+  """A collection of grpc servicers that handle communication between a
   ``TaskWorker`` and ``TaskWorkerHandler``.
 
   Contains three servers:
@@ -547,7 +545,8 @@ class ProxyGrpcClientDataChannelFactory(DataChannelFactory):
   """A factory for ``ProxyGrpcClientDataChannel``.
 
   No caching behavior here because we are starting each data channel on
-  different location."""
+  different location.
+  """
 
   def __init__(self, transmitter_url, credentials=None, worker_id=None):
     # type: (str, Optional[str], Optional[str]) -> None

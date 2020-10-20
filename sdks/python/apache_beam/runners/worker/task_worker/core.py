@@ -112,7 +112,7 @@ class BeamTask(beam.PTransform):
 
   By default, we use the local task worker, but subclass could specify the
   type of task worker to use by specifying the ``urn``, and override the
-  ``getPayload`` method to return meaningful payloads to that type of task
+  ``get_payload`` method to return meaningful payloads to that type of task
   worker.
   """
 
@@ -123,13 +123,13 @@ class BeamTask(beam.PTransform):
   # the sdk harness entry point
   SDK_HARNESS_ENTRY_POINT = TASK_WORKER_SDK_ENTRYPOINT
 
-  def __init__(self, fusedXform, wrapper=None, env=None):
+  def __init__(self, transform, wrapper=None, env=None):
     # type: (beam.PTransform, Optional[Callable[[Any, Any], Any]], Optional[beam.transforms.environments.Environment]) -> None
     self._wrapper = wrapper
     self._env = env
-    self._fusedXform = fusedXform
+    self._transform = transform
 
-  def getPayload(self):
+  def get_payload(self):
     # type: () -> Optional[Any]
     """
     Subclass should implement this to generate payload for TaskableValue.
@@ -138,7 +138,7 @@ class BeamTask(beam.PTransform):
     return None
 
   @staticmethod
-  def _hasTaggedOutputs(xform):
+  def _has_tagged_outputs(xform):
     # type: (beam.PTransform) -> bool
     """Checks to see if we have tagged output for the given PTransform."""
     if isinstance(xform, beam.core._MultiParDo):
@@ -150,16 +150,16 @@ class BeamTask(beam.PTransform):
 
   def expand(self, pcoll):
     # type: (beam.pvalue.PCollection) -> beam.pvalue.PCollection
-    payload = self.getPayload()
+    payload = self.get_payload()
     result = (
       pcoll
       | 'Wrap' >> beam.ParDo(WrapFn(), urn=self.urn, wrapper=self._wrapper,
                    env=self._env, payload=payload)
       | 'StartStage' >> beam.Reshuffle()
       | 'UnWrap' >> beam.ParDo(UnWrapFn())
-      | self._fusedXform
+      | self._transform
     )
-    if self._hasTaggedOutputs(self._fusedXform):
+    if self._has_tagged_outputs(self._transform):
       # for xforms that ended up with tagged outputs, we don't want to
       # add reshuffle, because it will be a stage split point already,
       # also adding reshuffle would error since we now have a tuple of

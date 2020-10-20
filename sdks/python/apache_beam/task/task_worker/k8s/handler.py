@@ -16,8 +16,9 @@
 #
 
 """
-Kubernetes TaskWorker.
+Kubernetes task worker implementation.
 """
+
 from __future__ import absolute_import
 
 import threading
@@ -151,6 +152,10 @@ class KubeTaskWorkerHandler(TaskWorkerHandler):
     return True
 
   def create_job(self):
+    # type: () -> V1Job
+    """
+    Create a kubernetes job object.
+    """
 
     env = [
       V1EnvVar(name='TASK_WORKER_ID', value=self.worker_id),
@@ -187,12 +192,18 @@ class KubeTaskWorkerHandler(TaskWorkerHandler):
 
   def submit_job(self, job):
     # type: (V1Job) -> str
+    """
+    Submit a kubernetes job.
+    """
     api_response = self.api.create_namespaced_job(
       body=job,
       namespace=self.task_payload.namespace)
     return api_response.metadata.uid
 
   def delete_job(self):
+    """
+    Delete the kubernetes job.
+    """
     return self.api.delete_namespaced_job(
       name=self.task_payload.name,
       namespace=self.task_payload.namespace,

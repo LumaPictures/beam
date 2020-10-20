@@ -35,7 +35,7 @@ class KubeTask(BeamTask):
 
   K8S_NAME_RE = re.compile(r'[a-z][a-zA-Z0-9-.]*')
 
-  def getPayload(self):
+  def get_payload(self):
     """
     Get a task payload for configuring a kubernetes job.
     """
