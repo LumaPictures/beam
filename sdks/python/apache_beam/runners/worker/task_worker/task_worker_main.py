@@ -24,8 +24,8 @@ import sys
 import traceback
 
 from apache_beam.runners.worker.sdk_worker_main import _load_main_session
-from apache_beam.runners.worker.task_worker import BundleProcessorTaskWorker
-from apache_beam.runners.worker.task_worker import TaskWorkerHandler
+from apache_beam.runners.worker.task_worker.handlers import BundleProcessorTaskWorker
+from apache_beam.runners.worker.task_worker.handlers import TaskWorkerHandler
 
 # This module is experimental. No backwards-compatibility guarantees.
 

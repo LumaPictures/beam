@@ -1024,8 +1024,8 @@ class BundleProcessor(object):
     TaskableValue detected from input of this bundle) and task worker is
     allowed to be used.
     """
-    from apache_beam.runners.worker.task_worker import BundleProcessorTaskHelper
-    from apache_beam.runners.worker.task_worker import get_taskable_value
+    from apache_beam.runners.worker.task_worker.handlers import BundleProcessorTaskHelper
+    from apache_beam.runners.worker.task_worker.handlers import get_taskable_value
 
     wrapped_values = collections.defaultdict(list)  # type: DefaultDict[str, List[Tuple[Any, bytes]]]
 
