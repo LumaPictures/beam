@@ -86,8 +86,9 @@ class TaskableValue(object):
   """
   Value that can be distributed to TaskWorkers as tasks.
 
-  Has the original value, and TaskProperties that specifies how the task will
-  be generated.
+  Has the original value, urn, env and payload that specifies how the task will
+  be generated. urn is used for getting the correct type of TaskWorkerHandler to
+  handle processing the current value.
   """
 
   def __init__(
@@ -165,7 +166,7 @@ class TaskWorkerHandler(GrpcWorkerHandler):
     if worker_id:
       self.worker_id = worker_id
 
-    self.control_address = self.port_from_worker(self._grpc_server.control_port)
+    self.control_address = self._grpc_server.control_address
     self.provision_address = self.control_address
     self.logging_address = self.port_from_worker(
       self.get_port_from_env_var('LOGGING_API_SERVICE_DESCRIPTOR'))

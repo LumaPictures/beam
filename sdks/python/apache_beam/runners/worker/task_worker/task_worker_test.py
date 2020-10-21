@@ -20,25 +20,21 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import os
 import logging
-import mock
 import threading
 import unittest
-from builtins import range
-from collections import defaultdict
 
-import grpc
-from future.utils import raise_
+from google.protobuf import text_format
 
-from apache_beam.coders import coders, coder_impl
 from apache_beam.portability.api import beam_fn_api_pb2
+from apache_beam.portability.api import beam_provision_api_pb2
 from apache_beam.portability.api import beam_runner_api_pb2
 from apache_beam.portability.api import beam_task_worker_pb2
 from apache_beam.portability.api import endpoints_pb2
 from apache_beam.runners.worker.task_worker import handlers
 from apache_beam.runners.worker.data_plane import GrpcClientDataChannelFactory
 from apache_beam.runners.worker.sdk_worker import CachingStateHandler
-from apache_beam.transforms import window
 
 
 # -- utilities for testing, mocking up test objects
@@ -86,6 +82,7 @@ class _MockTaskWorkerHandler(handlers.TaskWorkerHandler):
                worker_id=None,  # type: Optional[str]
                responseByRequestType=None
                ):
+    provision_info = beam_provision_api_pb2.ProvisionInfo()
     super(_MockTaskWorkerHandler, self).__init__(state, provision_info,
                                                  grpc_server, environment,
                                                  task_payload,
@@ -121,11 +118,16 @@ class _MockTaskGrpcServer(handlers.TaskGrpcServer):
   def __init__(self, instruction_id, max_workers=1, data_store=None):
     dummy_state_handler = _MockCachingStateHandler(None, None)
     dummy_data_channel_factory = GrpcClientDataChannelFactory()
-
+    provision_info = beam_provision_api_pb2.ProvisionInfo()
     super(_MockTaskGrpcServer, self).__init__(dummy_state_handler, max_workers,
                                               data_store or {},
                                               dummy_data_channel_factory,
-                                              instruction_id)
+                                              instruction_id, provision_info)
+    self.control_address = 'localhost:{}'.format(self.control_port)
+    control_descriptor = text_format.MessageToString(
+        endpoints_pb2.ApiServiceDescriptor(url=self.control_address))
+    print(control_descriptor)
+    os.environ['CONTROL_API_SERVICE_DESCRIPTOR'] = control_descriptor
 
 
 class _MockCachingStateHandler(CachingStateHandler):
@@ -138,8 +140,7 @@ class _MockCachingStateHandler(CachingStateHandler):
     self._underlying = underlying_state
     self._state_cache = global_state_cache
     self._context = threading.local()
-
-    self._context.cache_token = ''
+    self._context.bundle_cache_token = ''
 
 
 class _MockDataInputOperation(object):
@@ -195,6 +196,12 @@ def prep_bundle_processor_descriptor(bundle_id):
 
 class TaskWorkerHandlerTest(unittest.TestCase):
 
+  def setUp(self):
+    # put endpoints environment variable in for testing
+    logging_descriptor = text_format.MessageToString(
+        endpoints_pb2.ApiServiceDescriptor(url='localhost:10000'))
+    os.environ['LOGGING_API_SERVICE_DESCRIPTOR'] = logging_descriptor
+
   @staticmethod
   def _get_task_worker_handler(worker_id, resp_by_type, instruction_id,
                                max_workers=1, data_store=None):
@@ -218,7 +225,7 @@ class TaskWorkerHandlerTest(unittest.TestCase):
     test_handler = self._get_task_worker_handler(worker_id, resp_by_type,
                                                  instruction_id)
 
-    proxy_data_channel_factory = task_worker.ProxyGrpcClientDataChannelFactory(
+    proxy_data_channel_factory = handlers.ProxyGrpcClientDataChannelFactory(
       test_handler._grpc_server.data_address
     )
 
@@ -267,14 +274,14 @@ class TaskWorkerHandlerTest(unittest.TestCase):
 
     test_handler = self._get_task_worker_handler(worker_id, resp_by_type,
                                                  instruction_id)
-    proxy_data_channel_factory = task_worker.ProxyGrpcClientDataChannelFactory(
+    proxy_data_channel_factory = handlers.ProxyGrpcClientDataChannelFactory(
       test_handler._grpc_server.data_address
     )
 
     test_handler.start_worker()
 
     try:
-      with self.assertRaises(task_worker.TaskWorkerProcessBundleError):
+      with self.assertRaises(handlers.TaskWorkerProcessBundleError):
         print(test_handler.execute)
         test_handler.execute(
           proxy_data_channel_factory,
@@ -283,125 +290,6 @@ class TaskWorkerHandlerTest(unittest.TestCase):
       test_handler.stop_worker()
     finally:
       test_handler._grpc_server.close()
-
-
-class BundleProcessorTaskHelperTest(unittest.TestCase):
-
-  @staticmethod
-  def _get_test_int_coder():
-    return coders.WindowedValueCoder(coders.VarIntCoder(),
-                                     coders.GlobalWindowCoder())
-
-  @staticmethod
-  def _get_test_pickle_coder():
-    return coders.WindowedValueCoder(coders.FastPrimitivesCoder(),
-                                     coders.GlobalWindowCoder())
-
-  @staticmethod
-  def _prep_elements(elements):
-    return [window.GlobalWindows.windowed_value(elem) for elem in elements]
-
-  @staticmethod
-  def _prep_encoded_data(coder, elements, instruction_id, transform_id):
-    temp_out = coder_impl.create_OutputStream()
-    raw_bytes = []
-
-    for elem in elements:
-      encoded = coder.encode(elem)
-      raw_bytes.append(encoded)
-      coder.get_impl().encode_to_stream(elem, temp_out, True)
-
-    data = beam_fn_api_pb2.Elements.Data(
-      instruction_id=instruction_id,
-      transform_id=transform_id,
-      data=temp_out.get()
-    )
-    return raw_bytes, data
-
-  def test_data_split_with_task_worker(self):
-    """
-    Test that input data is split correctly by BundleProcessorTaskHelper.
-    """
-    test_coder = self._get_test_pickle_coder()
-    mocked_op = _MockDataInputOperation(test_coder)
-
-    test_elems = self._prep_elements(
-      [task_worker.TaskableValue(i, 'unittest') for i in range(5)])
-    instruction_id = 'test_instruction_1'
-    transform_id = 'test_transform_1'
-
-    test_task_helper = task_worker.BundleProcessorTaskHelper(instruction_id)
-    raw_bytes, data = self._prep_encoded_data(test_coder, test_elems,
-                                              instruction_id, transform_id)
-
-    test_task_helper.process_encoded(mocked_op, data)
-    self.assertEquals(mocked_op.decoded, [])
-    expected_wrapped_values = defaultdict(list)
-    for decode, raw in zip(test_elems, raw_bytes):
-      expected_wrapped_values[transform_id].append((decode.value, raw))
-    self.assertItemsEqual(test_task_helper.wrapped_values, expected_wrapped_values)
-
-  def test_process_normally_without_task_worker(self):
-    """
-    Test that when input data doesn't consists of TaskableValue, it is processed
-    not using task worker but normally via DataInputOperation's process.
-    """
-    test_coder = self._get_test_int_coder()
-    mocked_op = _MockDataInputOperation(test_coder)
-
-    test_elems = self._prep_elements(range(5))
-    instruction_id = 'test_instruction_2'
-    transform_id = 'test_transform_1'
-
-    test_task_helper = task_worker.BundleProcessorTaskHelper(instruction_id)
-    _, data = self._prep_encoded_data(test_coder, test_elems, instruction_id,
-                                      transform_id)
-
-    test_task_helper.process_encoded(mocked_op, data)
-
-    # when processed normally, it will use the DataInputOperation to process,
-    # so it will be recorded in the `decoded` list
-    self.assertEquals(mocked_op.decoded, test_elems)
-
-  @mock.patch.object(handlers, 'MAX_TASK_WORKER_RETRY', 2)
-  @mock.patch('__main__._MockTaskWorkerHandler.execute',
-              side_effect=handlers.TaskWorkerProcessBundleError('test'))
-  @mock.patch('__main__._MockTaskWorkerHandler.start_worker')
-  @mock.patch('__main__._MockTaskWorkerHandler.stop_worker')
-  def test_exceed_max_retries(self, unused_mock_stop, unused_mock_start,
-                              mock_execute):
-    """
-    Test the scenario when task worker fails exceed max retries.
-    """
-    test_coder = self._get_test_pickle_coder()
-    mocked_op = _MockDataInputOperation(test_coder)
-
-    test_coder = self._get_test_pickle_coder()
-
-    test_elems = self._prep_elements(
-      [handlers.TaskableValue(i, 'unittest') for i in range(2)]
-    )
-    instruction_id = 'test_instruction_3'
-    transform_id = 'test_transform_1'
-
-    test_task_helper = task_worker.BundleProcessorTaskHelper(instruction_id)
-    _, data = self._prep_encoded_data(test_coder, test_elems, instruction_id,
-                                      transform_id)
-    test_task_helper.process_encoded(mocked_op, data)
-
-    dummy_process_bundle_descriptor = prep_bundle_processor_descriptor(1)
-    dummy_data_channel_factory = GrpcClientDataChannelFactory()
-    dummy_state_handler = _MockCachingStateHandler(None, None)
-
-    with self.assertRaises(RuntimeError):
-      test_task_helper.process_bundle_with_task_workers(
-        dummy_state_handler,
-        dummy_data_channel_factory,
-        dummy_process_bundle_descriptor
-      )
-
-    # num(elems) * MAX_TASK_WORKER_RETRY
-    self.assertEquals(mock_execute.call_count, 4)
 
 
 if __name__ == "__main__":

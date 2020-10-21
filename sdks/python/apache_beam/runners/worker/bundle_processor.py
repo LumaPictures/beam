@@ -1020,9 +1020,8 @@ class BundleProcessor(object):
     # type: (...) -> Union[Tuple[None, None], Tuple[List[beam_fn_api_pb2.DelayedBundleApplication], bool]]
     """Process the current bundle remotely with task workers, if applicable.
 
-    Processes remotely if ``wrapped_values`` is not None (meaning there are
-    TaskableValue detected from input of this bundle) and task worker is
-    allowed to be used.
+    Processes remotely if there are TaskableValues detected from the input of this bundle
+    and task workers are allowed to be used.
     """
     from apache_beam.runners.worker.task_worker.handlers import BundleProcessorTaskHelper
     from apache_beam.runners.worker.task_worker.handlers import get_taskable_value
@@ -1073,7 +1072,7 @@ class BundleProcessor(object):
               # fallback to process it as normal, trigger receivers to process
               with input_op.splitting_lock:
                 if input_op.index == input_op.stop - 1:
-                  return
+                  return None, None
                 input_op.index += 1
               input_op.output(decoded_value)
 
