@@ -15,6 +15,12 @@
 # limitations under the License.
 #
 
+"""
+Sample pipeline showcasing how to use the kubernetes task worker.
+"""
+
+from __future__ import absolute_import
+
 import argparse
 import logging
 from typing import TYPE_CHECKING
@@ -23,12 +29,11 @@ import apache_beam as beam
 from apache_beam.options.pipeline_options import DirectOptions
 from apache_beam.options.pipeline_options import PipelineOptions
 from apache_beam.options.pipeline_options import SetupOptions
-
-from apache_beam.task.task_worker.k8s.transforms import KubeTask
+from apache_beam.task.task_worker.kubejob.transforms import KubeTask
 
 if TYPE_CHECKING:
   from typing import Any
-  from apache_beam.task.task_worker.k8s.handler import KubeTaskProperties
+  from apache_beam.task.task_worker.kubejob.handler import KubePayload
 
 
 def process(element):
@@ -43,14 +48,12 @@ def process(element):
 
 
 def _per_element_wrapper(element, payload):
-  # type: (Any, KubeTaskProperties) -> KubeTaskProperties
+  # type: (Any, KubePayload) -> KubePayload
   """
   Callback to modify the kubernetes job properties per-element.
   """
-  import copy
-  result = copy.copy(payload)
-  result.name += '-{}'.format(element)
-  return result
+  payload.job_name += '-{}'.format(element)
+  return payload
 
 
 def run(argv=None, save_main_session=True):

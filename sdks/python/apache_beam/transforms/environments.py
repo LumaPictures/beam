@@ -45,6 +45,7 @@ from typing import overload
 from google.protobuf import message
 
 from apache_beam import coders
+from apache_beam.options.pipeline_options import PortableOptions
 from apache_beam.options.pipeline_options import SetupOptions
 from apache_beam.portability import common_urns
 from apache_beam.portability import python_urns
@@ -55,7 +56,7 @@ from apache_beam.runners.portability.sdk_container_builder import SdkContainerIm
 from apache_beam.utils import proto_utils
 
 if TYPE_CHECKING:
-  from apache_beam.options.pipeline_options import PortableOptions
+  from apache_beam.options.pipeline_options import PipelineOptions
   from apache_beam.runners.pipeline_context import PipelineContext
 
 __all__ = [
@@ -276,17 +277,25 @@ class DockerEnvironment(Environment):
         artifacts=artifacts)
 
   @classmethod
-  def from_options(cls, options):
-    # type: (PortableOptions) -> DockerEnvironment
+  def get_container_image_from_options(cls, options):
+    # type: (PipelineOptions) -> str
     if options.view_as(SetupOptions).prebuild_sdk_container_engine:
-      prebuilt_container_image = SdkContainerImageBuilder.build_container_image(
-          options)
-      return cls.from_container_image(
-          container_image=prebuilt_container_image,
-          artifacts=python_sdk_dependencies(options))
+      return SdkContainerImageBuilder.build_container_image(options)
+    portable_options = options.view_as(PortableOptions)
+    result = portable_options.lookup_environment_option(
+      'docker_container_image')
+    if not result:
+      result = portable_options.environment_config
+    if not result:
+      result = cls.default_docker_image()
+    return result
+
+  @classmethod
+  def from_options(cls, options):
+    # type: (PipelineOptions) -> DockerEnvironment
+    container_image = cls.get_container_image_from_options(options)
     return cls.from_container_image(
-        container_image=options.lookup_environment_option(
-            'docker_container_image') or options.environment_config,
+        container_image=container_image,
         artifacts=python_sdk_dependencies(options))
 
   @classmethod

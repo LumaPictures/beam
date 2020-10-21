@@ -19,6 +19,7 @@ TaskWorker core user facing PTransforms that allows packaging elements as
 TaskableValue for beam task workers.
 """
 
+import copy
 from typing import TYPE_CHECKING
 
 import apache_beam as beam
@@ -26,6 +27,7 @@ from apache_beam.runners.worker.task_worker.handlers import TaskableValue
 
 if TYPE_CHECKING:
   from typing import Any, Optional, Callable, Iterator
+  from apache_beam.options.pipeline_options import PipelineOptions
   from apache_beam.transforms.environments import Environment
 
 
@@ -60,7 +62,7 @@ class WrapFn(beam.DoFn):
     # override payload if given a wrapper function, which will vary per
     # element
     if wrapper:
-      payload = wrapper(element, payload)
+      payload = wrapper(element, copy.deepcopy(payload))
 
     if payload:
       result = TaskableValue(element, urn, env=env, payload=payload)
@@ -129,8 +131,8 @@ class BeamTask(beam.PTransform):
     self._env = env
     self._transform = transform
 
-  def get_payload(self):
-    # type: () -> Optional[Any]
+  def get_payload(self, options):
+    # type: (PipelineOptions) -> Optional[Any]
     """
     Subclass should implement this to generate payload for TaskableValue.
     Default to None.
@@ -150,11 +152,11 @@ class BeamTask(beam.PTransform):
 
   def expand(self, pcoll):
     # type: (beam.pvalue.PCollection) -> beam.pvalue.PCollection
-    payload = self.get_payload()
+    payload = self.get_payload(pcoll.pipeline.options)
     result = (
       pcoll
       | 'Wrap' >> beam.ParDo(WrapFn(), urn=self.urn, wrapper=self._wrapper,
-                   env=self._env, payload=payload)
+                             env=self._env, payload=payload)
       | 'StartStage' >> beam.Reshuffle()
       | 'UnWrap' >> beam.ParDo(UnWrapFn())
       | self._transform

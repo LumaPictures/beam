@@ -313,7 +313,8 @@ setuptools.setup(
         'interactive': INTERACTIVE_BEAM,
         'interactive_test': INTERACTIVE_BEAM_TEST,
         'aws': AWS_REQUIREMENTS,
-        'azure': AZURE_REQUIREMENTS
+        'azure': AZURE_REQUIREMENTS,
+        'taskworker_k8s': ['kubernetes>=11.0.0'],
     },
     zip_safe=False,
     # PyPI package information.
@@ -336,7 +337,7 @@ setuptools.setup(
             'beam_test_plugin = test_config:BeamTestPlugin',
         ],
         'apache_beam_task_workers_plugins': [
-            'k8s_task_worker = apache_beam.task.task_worker.k8s.handler:KubeTaskWorkerHandler',
+            'k8s_task_worker = apache_beam.task.task_worker.kubejob.handler:KubeTaskWorkerHandler',
         ]},
     cmdclass={
         'build_py': generate_protos_first(build_py),
