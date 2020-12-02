@@ -823,7 +823,8 @@ class BundleProcessor(object):
   def __init__(self,
                process_bundle_descriptor,  # type: beam_fn_api_pb2.ProcessBundleDescriptor
                state_handler,  # type: sdk_worker.CachingStateHandler
-               data_channel_factory  # type: data_plane.DataChannelFactory
+               data_channel_factory,  # type: data_plane.DataChannelFactory
+               use_task_worker=True  # type: bool
               ):
     # type: (...) -> None
 
@@ -834,10 +835,12 @@ class BundleProcessor(object):
         a description of the stage that this ``BundleProcessor``is to execute.
       state_handler (CachingStateHandler).
       data_channel_factory (``data_plane.DataChannelFactory``).
+      use_task_worker : whether to engage the task worker system when processing
     """
     self.process_bundle_descriptor = process_bundle_descriptor
     self.state_handler = state_handler
     self.data_channel_factory = data_channel_factory
+    self.use_task_worker = use_task_worker
 
     # There is no guarantee that the runner only set
     # timer_api_service_descriptor when having timers. So this field cannot be
@@ -980,20 +983,9 @@ class BundleProcessor(object):
         self.ops[transform_id].add_timer_info(timer_family_id, timer_info)
 
       # Process data and timer inputs
-      for data_channel, expected_inputs in data_channels.items():
-        for element in data_channel.input_elements(instruction_id,
-                                                   expected_inputs):
-          if isinstance(element, beam_fn_api_pb2.Elements.Timers):
-            timer_coder_impl = (
-                self.timers_info[(
-                    element.transform_id,
-                    element.timer_family_id)].timer_coder_impl)
-            for timer_data in timer_coder_impl.decode_all(element.timers):
-              self.ops[element.transform_id].process_timer(
-                  element.timer_family_id, timer_data)
-          elif isinstance(element, beam_fn_api_pb2.Elements.Data):
-            input_op_by_transform_id[element.transform_id].process_encoded(
-                element.data)
+      delayed_applications, requires_finalization = \
+        self.maybe_process_remotely(data_channels, instruction_id,
+                                    input_op_by_transform_id)
 
       # Finish all operations.
       for op in self.ops.values():
@@ -1005,17 +997,95 @@ class BundleProcessor(object):
         assert timer_info.output_stream is not None
         timer_info.output_stream.close()
 
-      return ([
-          self.delayed_bundle_application(op, residual) for op,
-          residual in execution_context.delayed_applications
-      ],
-              self.requires_finalization())
+      if requires_finalization is None:
+        requires_finalization = self.requires_finalization()
+
+      if delayed_applications is None:
+        delayed_applications = [self.delayed_bundle_application(op, residual)
+                                for op, residual in
+                                execution_context.delayed_applications]
+
+      return delayed_applications, requires_finalization
 
     finally:
       # Ensure any in-flight split attempts complete.
       with self.splitting_lock:
         pass
       self.state_sampler.stop_if_still_running()
+
+  def maybe_process_remotely(self,
+                             data_channels,  # type: DefaultDict[DataChannel, list[str]]
+                             instruction_id,  # type: str
+                             input_op_by_transform_id,  # type: Dict[str, DataInputOperation]
+                             ):
+    # type: (...) -> Union[Tuple[None, None], Tuple[List[beam_fn_api_pb2.DelayedBundleApplication], bool]]
+    """Process the current bundle remotely with task workers, if applicable.
+
+    Processes remotely if there are TaskableValues detected from the input of this bundle
+    and task workers are allowed to be used.
+    """
+    from apache_beam.runners.worker.task_worker.handlers import BundleProcessorTaskHelper
+    from apache_beam.runners.worker.task_worker.handlers import get_taskable_value
+
+    wrapped_values = collections.defaultdict(list)  # type: DefaultDict[str, List[Tuple[Any, bytes]]]
+
+    for data_channel, expected_transforms in data_channels.items():
+      for data in data_channel.input_elements(
+            instruction_id, expected_transforms):
+        if isinstance(data, beam_fn_api_pb2.Elements.Timers):
+          timer_coder_impl = (
+            self.timers_info[(
+              data.transform_id,
+              data.timer_family_id)].timer_coder_impl)
+          for timer_data in timer_coder_impl.decode_all(data.timers):
+            self.ops[data.transform_id].process_timer(
+              data.timer_family_id, timer_data)
+        elif isinstance(data, beam_fn_api_pb2.Elements.Data):
+          input_op = input_op_by_transform_id[data.transform_id]
+
+          # process normally if not using task worker
+          if self.use_task_worker is False:
+            input_op.process_encoded(data.data)
+            continue
+
+          # decode inputs to inspect if it is wrapped
+          input_stream = coder_impl.create_InputStream(data.data)
+          # TODO: Come up with a better solution here?
+          # here we maintain two separate input stream, because `.pos` is not
+          # accessible on the cython version of InputStream object, so we can't
+          # re-use the same input stream object and edit the pos to move the
+          # read handle back
+          raw_input_stream = coder_impl.create_InputStream(data.data)
+
+          while input_stream.size() > 0:
+            starting_size = input_stream.size()
+            decoded_value = input_op.windowed_coder_impl.decode_from_stream(
+              input_stream, True)
+            cur_size = input_stream.size()
+            raw_bytes = raw_input_stream.read(starting_size - cur_size)
+            # make sure these two stream stays in sync in size
+            assert raw_input_stream.size() == input_stream.size()
+            if decoded_value.value and get_taskable_value(decoded_value.value):
+              # save this to process later in ``process_bundle_with_task_workers``
+              wrapped_values[data.transform_id].append(
+                (get_taskable_value(decoded_value.value), raw_bytes))
+            else:
+              # fallback to process it as normal, trigger receivers to process
+              with input_op.splitting_lock:
+                if input_op.index == input_op.stop - 1:
+                  return None, None
+                input_op.index += 1
+              input_op.output(decoded_value)
+
+    if wrapped_values:
+      task_helper = BundleProcessorTaskHelper(instruction_id, wrapped_values)
+      return task_helper.process_bundle_with_task_workers(
+        self.state_handler,
+        self.data_channel_factory,
+        self.process_bundle_descriptor
+      )
+    else:
+      return None, None
 
   def finalize_bundle(self):
     # type: () -> beam_fn_api_pb2.FinalizeBundleResponse

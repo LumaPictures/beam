@@ -141,6 +141,7 @@ REQUIRED_PACKAGES = [
     # server, therefore list of allowed versions is very narrow.
     # See: https://github.com/uqfoundation/dill/issues/341.
     'dill>=0.3.1.1,<0.3.2',
+    'entrypoints>=0.3',
     'fastavro>=0.21.4,<2',
     'funcsigs>=1.0.2,<2; python_version < "3.0"',
     'future>=0.18.2,<1.0.0',
@@ -312,7 +313,8 @@ setuptools.setup(
         'interactive': INTERACTIVE_BEAM,
         'interactive_test': INTERACTIVE_BEAM_TEST,
         'aws': AWS_REQUIREMENTS,
-        'azure': AZURE_REQUIREMENTS
+        'azure': AZURE_REQUIREMENTS,
+        'taskworker_k8s': ['kubernetes>=11.0.0'],
     },
     zip_safe=False,
     # PyPI package information.
@@ -333,6 +335,9 @@ setuptools.setup(
     entry_points={
         'nose.plugins.0.10': [
             'beam_test_plugin = test_config:BeamTestPlugin',
+        ],
+        'apache_beam_task_workers_plugins': [
+            'k8s_task_worker = apache_beam.task.task_worker.kubejob.handler:KubeTaskWorkerHandler',
         ]},
     cmdclass={
         'build_py': generate_protos_first(build_py),

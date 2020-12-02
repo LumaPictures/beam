@@ -1,0 +1,137 @@
+/*
+ * Protocol Buffers describing a custom bundle processer used by Task Worker.
+ */
+
+syntax = "proto3";
+
+package org.apache.beam.model.fn_execution.v1;
+
+option go_package = "fnexecution_v1";
+option java_package = "org.apache.beam.model.fnexecution.v1";
+//option java_outer_classname = "JobApi";
+
+import "beam_fn_api.proto";
+import "endpoints.proto";
+import "google/protobuf/struct.proto";
+import "metrics.proto";
+
+
+//
+//  Control Plane
+//
+
+// An API that describes the work that a bundle processor task worker is meant to do.
+service TaskControl {
+
+    // Instructions sent by the SDK to the task worker requesting different types
+    // of work.
+    rpc Control (
+        // A stream of responses to instructions the task worker was asked to be
+        // performed.
+        stream TaskInstructionResponse)
+        returns (
+            // A stream of instructions requested of the task worker to be performed.
+            stream TaskInstructionRequest);
+}
+
+// A request sent by SDK which the task worker is asked to fulfill.
+message TaskInstructionRequest {
+    // (Required) An unique identifier provided by the SDK which represents
+    // this requests execution. The InstructionResponse MUST have the matching id.
+    string instruction_id = 1;
+
+    // (Required) A request that the task worker needs to interpret.
+    oneof request {
+        CreateRequest create = 1000;
+        ProcessorProcessBundleRequest process_bundle = 1001;
+        ShutdownRequest shutdown = 1002;
+    }
+}
+
+// The response for an associated request the task worker had been asked to fulfill.
+message TaskInstructionResponse {
+
+    // (Required) A reference provided by the SDK which represents a requests
+    // execution. The InstructionResponse MUST have the matching id when
+    // responding to the SDK.
+    string instruction_id = 1;
+
+    // An equivalent response type depending on the request this matches.
+    oneof response {
+        CreateResponse create = 1000;
+        ProcessorProcessBundleResponse process_bundle = 1001;
+        ShutdownResponse shutdown = 1002;
+    }
+
+    // (Optional) If there's error processing request
+    string error = 2;
+}
+
+message ChannelCredentials {
+    string _credentials = 1;
+}
+
+message GrpcClientDataChannelFactory {
+    ChannelCredentials credentials = 1;
+    string worker_id = 2;
+    string transmitter_url = 3;
+}
+
+message CreateRequest {
+    org.apache.beam.model.fn_execution.v1.ProcessBundleDescriptor process_bundle_descriptor = 1; // (required)
+    org.apache.beam.model.pipeline.v1.ApiServiceDescriptor state_handler_endpoint = 2; // (required)
+    GrpcClientDataChannelFactory data_factory = 3; // (required)
+}
+
+message CreateResponse {
+}
+
+message ProcessorProcessBundleRequest {
+    // (Optional) The cache token that can be used by an SDK to reuse
+    // cached data returned by the State API across multiple bundles.
+    string cache_token = 1;
+}
+
+message ProcessorProcessBundleResponse {
+    repeated org.apache.beam.model.fn_execution.v1.DelayedBundleApplication delayed_applications = 1;
+    bool require_finalization = 2;
+}
+
+message ShutdownRequest {
+}
+
+message ShutdownResponse {
+}
+
+
+//
+//  Data Plane
+//
+
+service TaskFnData {
+  // Handles data transferring between TaskWorkerHandler and Task Worker.
+  rpc Receive(
+      ReceiveRequest)
+      returns (
+          // A stream of data representing output.
+          stream Elements.Data);
+
+
+  // Used to send data from proxy bundle processor to sdk harness
+  rpc Send (SendRequest) returns (SendResponse);
+}
+
+message ReceiveRequest {
+  string instruction_id = 1;
+  string client_data_endpoint = 2;
+}
+
+message SendRequest {
+  string instruction_id = 1;
+  string client_data_endpoint = 2;
+  Elements.Data data = 3;
+}
+
+message SendResponse {
+  string error = 1;
+}

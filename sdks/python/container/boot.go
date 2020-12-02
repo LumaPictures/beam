@@ -50,17 +50,21 @@ var (
 
 	// Contract: https://s.apache.org/beam-fn-api-container-contract.
 
-	workerPool        = flag.Bool("worker_pool", false, "Run as worker pool (optional).")
-	id                = flag.String("id", "", "Local identifier (required).")
-	loggingEndpoint   = flag.String("logging_endpoint", "", "Logging endpoint (required).")
-	artifactEndpoint  = flag.String("artifact_endpoint", "", "Artifact endpoint (required).")
-	provisionEndpoint = flag.String("provision_endpoint", "", "Provision endpoint (required).")
-	controlEndpoint   = flag.String("control_endpoint", "", "Control endpoint (required).")
-	semiPersistDir    = flag.String("semi_persist_dir", "/tmp", "Local semi-persistent directory (optional).")
+	workerPool           = flag.Bool("worker_pool", false, "Run as worker pool (optional).")
+	id                   = flag.String("id", "", "Local identifier (required).")
+	loggingEndpoint      = flag.String("logging_endpoint", "", "Logging endpoint (required).")
+	artifactEndpoint     = flag.String("artifact_endpoint", "", "Artifact endpoint (required).")
+	provisionEndpoint    = flag.String("provision_endpoint", "", "Provision endpoint (required).")
+	controlEndpoint      = flag.String("control_endpoint", "", "Control endpoint (required).")
+	semiPersistDir       = flag.String("semi_persist_dir", "/tmp", "Local semi-persistent directory (optional).")
+	// this allows us to override entry point so it can be used by task worker
+	sdkHarnessEntrypoint = flag.String("sdk_harness_entry_point", "apache_beam.runners.worker.sdk_worker_main",
+	                                   "Entry point for the python process (optional).")
+	// this allows us to switch the python executable if needed (for example for use in DCC application)
+	pythonExec           = flag.String("python_executable", "python", "Python executable to use (optional).")
 )
 
 const (
-	sdkHarnessEntrypoint = "apache_beam.runners.worker.sdk_worker_main"
 	// Please keep these names in sync with stager.py
 	workflowFile      = "workflow.tar.gz"
 	requirementsFile  = "requirements.txt"
@@ -179,6 +183,10 @@ func main() {
 	os.Setenv("SEMI_PERSISTENT_DIRECTORY", *semiPersistDir)
 	os.Setenv("LOGGING_API_SERVICE_DESCRIPTOR", proto.MarshalTextString(&pipepb.ApiServiceDescriptor{Url: *loggingEndpoint}))
 	os.Setenv("CONTROL_API_SERVICE_DESCRIPTOR", proto.MarshalTextString(&pipepb.ApiServiceDescriptor{Url: *controlEndpoint}))
+	// we need to record the other endpoints here because task worker need to use boot to setup the environment for
+	// the sdk harness as well
+	os.Setenv("ARTIFACT_API_SERVICE_DESCRIPTOR", proto.MarshalTextString(&pipepb.ApiServiceDescriptor{Url: *artifactEndpoint}))
+	os.Setenv("PROVISION_API_SERVICE_DESCRIPTOR", proto.MarshalTextString(&pipepb.ApiServiceDescriptor{Url: *provisionEndpoint}))
 
 	if info.GetStatusEndpoint() != nil {
 		os.Setenv("STATUS_API_SERVICE_DESCRIPTOR", proto.MarshalTextString(info.GetStatusEndpoint()))
@@ -186,11 +194,11 @@ func main() {
 
 	args := []string{
 		"-m",
-		sdkHarnessEntrypoint,
+		*sdkHarnessEntrypoint,
 	}
-	log.Printf("Executing: python %v", strings.Join(args, " "))
+	log.Printf("Executing: %s %v", *pythonExec, strings.Join(args, " "))
 
-	log.Fatalf("Python exited: %v", execx.Execute("python", args...))
+	log.Fatalf("Python exited: %v", execx.Execute(*pythonExec, args...))
 }
 
 // setup wheel specs according to installed python version
