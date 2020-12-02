@@ -912,7 +912,8 @@ class BundleProcessorTaskWorker(object):
     self._bundle_processor = BundleProcessor(
       request.process_bundle_descriptor,
       state_handler,
-      data_channel_factory
+      data_channel_factory,
+      use_task_worker=False
     )
     return beam_task_worker_pb2.TaskInstructionResponse(
       create=beam_task_worker_pb2.CreateResponse(),
@@ -931,8 +932,7 @@ class BundleProcessorTaskWorker(object):
       with self._bundle_processor.state_handler._underlying.process_instruction_id(
           self.worker_id):
         delayed_applications, require_finalization = \
-          self._bundle_processor.process_bundle(self.worker_id,
-                                                use_task_worker=False)
+          self._bundle_processor.process_bundle(self.worker_id)
     except Exception as e:
       # we want to propagate the error back to the TaskWorkerHandler, so that
       # it will raise `TaskWorkerProcessBundleError` which allows for requeue

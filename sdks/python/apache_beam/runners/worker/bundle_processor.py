@@ -823,7 +823,8 @@ class BundleProcessor(object):
   def __init__(self,
                process_bundle_descriptor,  # type: beam_fn_api_pb2.ProcessBundleDescriptor
                state_handler,  # type: sdk_worker.CachingStateHandler
-               data_channel_factory  # type: data_plane.DataChannelFactory
+               data_channel_factory,  # type: data_plane.DataChannelFactory
+               use_task_worker=True  # type: bool
               ):
     # type: (...) -> None
 
@@ -834,10 +835,12 @@ class BundleProcessor(object):
         a description of the stage that this ``BundleProcessor``is to execute.
       state_handler (CachingStateHandler).
       data_channel_factory (``data_plane.DataChannelFactory``).
+      use_task_worker : whether to engage the task worker system when processing
     """
     self.process_bundle_descriptor = process_bundle_descriptor
     self.state_handler = state_handler
     self.data_channel_factory = data_channel_factory
+    self.use_task_worker = use_task_worker
 
     # There is no guarantee that the runner only set
     # timer_api_service_descriptor when having timers. So this field cannot be
@@ -928,8 +931,8 @@ class BundleProcessor(object):
     for op in self.ops.values():
       op.reset()
 
-  def process_bundle(self, instruction_id, use_task_worker=True):
-    # type: (str, bool) -> Tuple[List[beam_fn_api_pb2.DelayedBundleApplication], bool]
+  def process_bundle(self, instruction_id):
+    # type: (str) -> Tuple[List[beam_fn_api_pb2.DelayedBundleApplication], bool]
 
     expected_input_ops = []  # type: List[DataInputOperation]
 
@@ -982,8 +985,7 @@ class BundleProcessor(object):
       # Process data and timer inputs
       delayed_applications, requires_finalization = \
         self.maybe_process_remotely(data_channels, instruction_id,
-                                    input_op_by_transform_id,
-                                    use_task_worker=use_task_worker)
+                                    input_op_by_transform_id)
 
       # Finish all operations.
       for op in self.ops.values():
@@ -1015,7 +1017,6 @@ class BundleProcessor(object):
                              data_channels,  # type: DefaultDict[DataChannel, list[str]]
                              instruction_id,  # type: str
                              input_op_by_transform_id,  # type: Dict[str, DataInputOperation]
-                             use_task_worker=True  # type: bool
                              ):
     # type: (...) -> Union[Tuple[None, None], Tuple[List[beam_fn_api_pb2.DelayedBundleApplication], bool]]
     """Process the current bundle remotely with task workers, if applicable.
@@ -1043,7 +1044,7 @@ class BundleProcessor(object):
           input_op = input_op_by_transform_id[data.transform_id]
 
           # process normally if not using task worker
-          if use_task_worker is False:
+          if self.use_task_worker is False:
             input_op.process_encoded(data.data)
             continue
 
